@@ -19,24 +19,41 @@ model_names = sorted(name for name in models.__dict__
 
 parser = argparse.ArgumentParser(description='Trains ResNeXt on CIFAR or ImageNet',
                                  formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('data_path', type=str, help='Path to dataset')
-parser.add_argument('--dataset', type=str, choices=['cifar10', 'cifar100', 'imagenet', 'svhn', 'stl10'],
+#for resnet56
+ratio_dist_dict = {0.99: 0.89,
+                   0.98: 0.86,
+                   0.95: 0.80499,
+                   0.9: 0.723,
+                   0.87: 0.67999,
+                   0.85: 0.652,
+                   0.83: 0.625,
+                   0.8: 0.588}
+
+prune_ratio=0.99
+net_name='resnet56'
+parser.add_argument('--layer_begin', type=int, default=0, help='compress layer of model')
+parser.add_argument('--layer_end', type=int, default=164, help='compress layer of model')
+parser.add_argument('--layer_inter', type=int, default=3, help='compress layer of model')
+
+
+parser.add_argument('--data_path', type=str,default='/home/swim/fang/model_pytorch/data/dataset/cifar10', help='Path to dataset')
+parser.add_argument('--dataset', type=str,default='cifar10', choices=['cifar10', 'cifar100', 'imagenet', 'svhn', 'stl10'],
                     help='Choose between Cifar10/100 and ImageNet.')
-parser.add_argument('--arch', metavar='ARCH', default='resnet18', choices=model_names,
+parser.add_argument('--arch', metavar='ARCH', default=net_name, choices=model_names,
                     help='model architecture: ' + ' | '.join(model_names) + ' (default: resnext29_8_64)')
 # Optimization options
-parser.add_argument('--epochs', type=int, default=300, help='Number of epochs to train.')
+parser.add_argument('--epochs', type=int, default=200, help='Number of epochs to train.')
 parser.add_argument('--batch_size', type=int, default=128, help='Batch size.')
 parser.add_argument('--learning_rate', type=float, default=0.1, help='The Learning Rate.')
 parser.add_argument('--momentum', type=float, default=0.9, help='Momentum.')
 parser.add_argument('--decay', type=float, default=0.0005, help='Weight decay (L2 penalty).')
-parser.add_argument('--schedule', type=int, nargs='+', default=[150, 225],
+parser.add_argument('--schedule', type=int, nargs='+', default=[60,120,160],
                     help='Decrease learning rate at these epochs.')
-parser.add_argument('--gammas', type=float, nargs='+', default=[0.1, 0.1],
+parser.add_argument('--gammas', type=float, nargs='+', default=[0.2,0.2,0.2],
                     help='LR is multiplied by gamma on schedule, number of gammas should be equal to schedule')
 # Checkpoints
 parser.add_argument('--print_freq', default=200, type=int, metavar='N', help='print frequency (default: 200)')
-parser.add_argument('--save_path', type=str, default='./', help='Folder to save checkpoints and log.')
+parser.add_argument('--save_path', type=str, default='./data/model_saved/'+net_name+'_'+str(prune_ratio*100)+'_'+str(random.randint(1, 10000)), help='Folder to save checkpoints and log.')
 parser.add_argument('--resume', default='', type=str, metavar='PATH', help='path to latest checkpoint (default: none)')
 parser.add_argument('--start_epoch', default=0, type=int, metavar='N', help='manual epoch number (useful on restarts)')
 parser.add_argument('--evaluate', dest='evaluate', action='store_true', help='evaluate model on validation set')
@@ -47,14 +64,12 @@ parser.add_argument('--workers', type=int, default=2, help='number of data loadi
 parser.add_argument('--manualSeed', type=int, help='manual seed')
 # compress rate
 parser.add_argument('--rate_norm', type=float, default=0.9, help='the remaining ratio of pruning based on Norm')
-parser.add_argument('--rate_dist', type=float, default=0.1, help='the reducing ratio of pruning based on Distance')
+parser.add_argument('--rate_dist', type=float, default=ratio_dist_dict[prune_ratio], help='the reducing ratio of pruning based on Distance')
 
-parser.add_argument('--layer_begin', type=int, default=1, help='compress layer of model')
-parser.add_argument('--layer_end', type=int, default=1, help='compress layer of model')
-parser.add_argument('--layer_inter', type=int, default=1, help='compress layer of model')
+
 parser.add_argument('--epoch_prune', type=int, default=1, help='compress layer of model')
 parser.add_argument('--use_state_dict', dest='use_state_dict', action='store_true', help='use state dcit or not')
-parser.add_argument('--use_pretrain', dest='use_pretrain', action='store_true', help='use pre-trained model or not')
+parser.add_argument('--use_pretrain',default=False, dest='use_pretrain', action='store_true', help='use pre-trained model or not')
 parser.add_argument('--pretrain_path', default='', type=str, help='..path of pre-trained model')
 parser.add_argument('--dist_type', default='l2', type=str, choices=['l2', 'l1', 'cos'], help='distance type of GM')
 
@@ -290,7 +305,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, m):
         data_time.update(time.time() - end)
 
         if args.use_cuda:
-            target = target.cuda(async=True)
+            target = target.cuda()
             input = input.cuda()
         input_var = torch.autograd.Variable(input)
         target_var = torch.autograd.Variable(target)
@@ -301,9 +316,9 @@ def train(train_loader, model, criterion, optimizer, epoch, log, m):
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
-        top5.update(prec5[0], input.size(0))
+        losses.update(loss.data, input.size(0))
+        top1.update(prec1, input.size(0))
+        top5.update(prec5, input.size(0))
 
         # compute gradient and do SGD step
         optimizer.zero_grad()
@@ -333,7 +348,7 @@ def train(train_loader, model, criterion, optimizer, epoch, log, m):
     return top1.avg, losses.avg
 
 
-def validate(val_loader, model, criterion, log):
+def validate(val_loader, model, criterion, log=None):
     losses = AverageMeter()
     top1 = AverageMeter()
     top5 = AverageMeter()
@@ -343,7 +358,7 @@ def validate(val_loader, model, criterion, log):
 
     for i, (input, target) in enumerate(val_loader):
         if args.use_cuda:
-            target = target.cuda(async=True)
+            target = target.cuda()
             input = input.cuda()
         input_var = torch.autograd.Variable(input, volatile=True)
         target_var = torch.autograd.Variable(target, volatile=True)
@@ -354,9 +369,9 @@ def validate(val_loader, model, criterion, log):
 
         # measure accuracy and record loss
         prec1, prec5 = accuracy(output.data, target, topk=(1, 5))
-        losses.update(loss.data[0], input.size(0))
-        top1.update(prec1[0], input.size(0))
-        top5.update(prec5[0], input.size(0))
+        losses.update(loss.data, input.size(0))
+        top1.update(prec1, input.size(0))
+        top5.update(prec5, input.size(0))
 
     print_log('  **Test** Prec@1 {top1.avg:.3f} Prec@5 {top5.avg:.3f} Error@1 {error1:.3f}'.format(top1=top1, top5=top5,
                                                                                                    error1=100 - top1.avg),
@@ -365,10 +380,11 @@ def validate(val_loader, model, criterion, log):
     return top1.avg, losses.avg
 
 
-def print_log(print_string, log):
+def print_log(print_string, log=None):
     print("{}".format(print_string))
-    log.write('{}\n'.format(print_string))
-    log.flush()
+    if log is not None:
+        log.write('{}\n'.format(print_string))
+        log.flush()
 
 
 def save_checkpoint(state, is_best, save_path, filename):

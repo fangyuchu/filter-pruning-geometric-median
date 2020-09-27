@@ -160,7 +160,7 @@ def cifar_resnet_flop(layer=110, prune_rate=1):
     offset2 = channel[2] * width[2] * width[2] * 9 * channel[2] * prune_rate - channel[2] * width[2] * width[2] * 9 * \
             channel[1] * prune_rate
     flop = flop - offset1 - offset2
-    print(flop)
+    # print(flop)
     return flop
 
 
@@ -170,8 +170,13 @@ def cal_res(layer, rate):
     return flop_rate
 
 if __name__ == '__main__':
-    cal_res(110, 0.6)
-    cal_res(110, 0.5)
+    for i in range(0,1000,2):
+        print(0.9-0.01-i/1000,end='\t')
+        cal_res(56,0.01+i/1000)
+
+    # cal_res(56,0.1)
+    # cal_res(110, 0.6)
+    # cal_res(110, 0.5)
 
     # imagenet_flop(50, 1)
     # imagenet_flop(50, 0.9)
