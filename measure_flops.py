@@ -132,7 +132,7 @@ def measure_model(net, dataset_name='imagenet', print_flop=True):
     count_ops=0
     return count_ops_tmp
 if __name__ == '__main__':
-    checkpoint=torch.load('/home/swim/fang/filter-pruning-geometric-median/data/model_saved/resnet56_95.0_42/model_best.pth.tar')
+    checkpoint=torch.load('/home/swim/fang/filter-pruning-geometric-median/data/model_saved/resnet56_99.0_4115/model_best.pth.tar')
     net=checkpoint['state_dict']
     net=net.module
     measure_model(net,'cifar10')
